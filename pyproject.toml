@@ -1,0 +1,43 @@
+# pyproject.toml
+
+# ===============================================
+# 1. Build System Configuration (PEP 517/621)
+# Defines the tools used to build the package (e.g., setuptools, hatch, poetry).
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+# ===============================================
+# 2. Package Metadata (PEP 621)
+# The core information about your package.
+[project]
+name = "gentool"
+version = "1.0.0"
+authors = [
+    { name="J", email="your.email@example.com" },
+]
+description = "A simple, reusable collection of utility functions."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = ["utility"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "requests",
+    "tqdm",
+]
+
+# ===============================================
+# 3. Tool Configuration (e.g., for setuptools)
+# This section configures the package structure and file locations.
+[tool.setuptools]
+# Use the 'src' layout: package source is in src/
+# This is generally considered best practice.
+package-dir = {"" = "src"}
+# Automatically find all packages within the defined package-dir
+packages = ["gentool"]
