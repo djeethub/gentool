@@ -10,6 +10,9 @@ def get_valid_filename(response, url):
     """
     Determines the correct filename from Content-Disposition header or URL.
     """
+    filename = os.path.basename(url)
+    if '.' in filename:
+        return filename
     filename = None
     
     # Try to get filename from Content-Disposition header
@@ -24,11 +27,6 @@ def get_valid_filename(response, url):
                 clean_name = clean_name.split("UTF-8''")[-1]
             filename = unquote(clean_name)
 
-    # Fallback: Extract from URL
-    if not filename:
-        parsed_url = urlparse(url)
-        filename = unquote(os.path.basename(parsed_url.path))
-    
     # Final Fallback: Generic name
     if not filename or filename.strip() == "":
         return None
@@ -68,6 +66,11 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
         str: The final output file path on success.
         None: On failure.
     """
+    if out_path is None:
+        filename = os.path.basename(url)
+        if '.' in filename:
+            return filename
+
     session = requests.Session()
     
     try:
