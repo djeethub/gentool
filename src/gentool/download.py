@@ -28,10 +28,10 @@ def get_valid_filename(response, url):
     if not filename:
         parsed_url = urlparse(url)
         filename = unquote(os.path.basename(parsed_url.path))
-
+    
     # Final Fallback: Generic name
     if not filename or filename.strip() == "":
-        filename = "downloaded_file.bin"
+        return None
 
     # Sanitize filename (remove illegal chars for OS)
     return re.sub(r'[<>:"/\\|?*]', '_', filename)
@@ -81,6 +81,8 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
         # Determine filename
         filename = get_valid_filename(initial_response, final_url)
         initial_response.close()
+        if not filename:
+            return None
 
         # 2. Handle out_path = None (Info only mode)
         if out_path is None:
@@ -88,7 +90,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
         
         # 3. Resolve Output Path
         _,ext = os.path.splitext(out_path)
-        if os.path.isdir(out_path) or len(ext) < 1:
+        if os.path.isdir(out_path) or len(ext) < 2:
             final_path = os.path.join(out_path, filename)
             os.makedirs(out_path, exist_ok=True)
         else:
