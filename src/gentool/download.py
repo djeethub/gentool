@@ -58,7 +58,7 @@ def get_full_path(out_path, filename):
         filename = os.path.basename(final_path)
         # Create parent directories if they don't exist
         os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
-    return final_path
+    return final_path, filename
 
 def download_file(url, out_path=None, max_concurrent_connections=4):
     """
@@ -78,7 +78,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
     if '.' in filename:
         if out_path is None:
             return filename
-        final_path = get_full_path(out_path, filename)
+        final_path, filename = get_full_path(out_path, filename)
         if os.path.isfile(final_path):
             print(f"File already exists: {final_path}")
             return filename
@@ -100,7 +100,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
                 filename = get_valid_filename(initial_response, final_url)
                 if not filename or out_path is None:
                     return filename
-                final_path = get_full_path(out_path, filename)
+                final_path, filename = get_full_path(out_path, filename)
                 if os.path.isfile(final_path):
                     print(f"File already exists: {final_path}")
                     return filename
