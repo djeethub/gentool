@@ -3,7 +3,7 @@ import re
 import requests, sys
 from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 def get_valid_filename(response, url):
     """
@@ -136,7 +136,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
 
         # 7. Start Download
         # unit_scale=True makes 1024 -> 1k, etc.
-        with tqdm(total=file_size, unit='B', unit_scale=True, ncols=80, file=sys.stdout) as bar:
+        with tqdm(total=file_size, unit='B', unit_scale=True, file=sys.stdout) as bar:
             if max_concurrent_connections > 1:
                 with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
                     futures = []
