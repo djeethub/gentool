@@ -10,11 +10,7 @@ def get_valid_filename(response, url):
     """
     Determines the correct filename from Content-Disposition header or URL.
     """
-    filename = os.path.basename(url)
-    if '.' in filename:
-        return filename
     filename = None
-    
     # Try to get filename from Content-Disposition header
     cd = response.headers.get("content-disposition")
     if cd:
@@ -27,7 +23,6 @@ def get_valid_filename(response, url):
                 clean_name = clean_name.split("UTF-8''")[-1]
             filename = unquote(clean_name)
 
-    # Final Fallback: Generic name
     if not filename or filename.strip() == "":
         return None
 
@@ -51,6 +46,19 @@ def download_chunk(url, start, end, file_path, bar, session):
         return True
     except Exception as e:
         return False
+    
+def get_full_path(out_path, filename):
+    _,ext = os.path.splitext(out_path)
+    if os.path.isdir(out_path) or len(ext) < 2:
+        final_path = os.path.join(out_path, filename)
+        os.makedirs(out_path, exist_ok=True)
+    else:
+        # Assume out_path is the full desired path
+        final_path = out_path
+        filename = os.path.basename(final_path)
+        # Create parent directories if they don't exist
+        os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
+    return final_path
 
 def download_file(url, out_path=None, max_concurrent_connections=4):
     """
@@ -66,46 +74,40 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
         str: The final output file path on success.
         None: On failure.
     """
-    if out_path is None:
-        filename = os.path.basename(url)
-        if '.' in filename:
+    filename = os.path.basename(url)
+    if '.' in filename:
+        if out_path is None:
             return filename
+        final_path = get_full_path(out_path, filename)
+        if os.path.isfile(final_path):
+            print(f"File already exists: {final_path}")
+            return filename
+    else:
+        filename = None
 
     session = requests.Session()
     
     try:
         # 1. Initial Head Request to get headers and resolve redirects
         # We use stream=True to avoid downloading body, but ensure we follow redirects
-        initial_response = session.get(url, stream=True, allow_redirects=True)
-        final_url = initial_response.url
-        file_size = int(initial_response.headers.get('content-length', 0))
-        accept_ranges = initial_response.headers.get('accept-ranges', 'none')
-        
-        # Determine filename
-        filename = get_valid_filename(initial_response, final_url)
-        initial_response.close()
+        with session.get(url, stream=True, allow_redirects=True) as initial_response:
+            final_url = initial_response.url
+            file_size = int(initial_response.headers.get('content-length', 0))
+            accept_ranges = initial_response.headers.get('accept-ranges', 'none')
+            
+            # Determine filename
+            if not filename:
+                filename = get_valid_filename(initial_response, final_url)
+                if not filename or out_path is None:
+                    return filename
+                final_path = get_full_path(out_path, filename)
+                if os.path.isfile(final_path):
+                    print(f"File already exists: {final_path}")
+                    return filename
+                
         if not filename:
-            return None
-
-        # 2. Handle out_path = None (Info only mode)
-        if out_path is None:
             return filename
         
-        # 3. Resolve Output Path
-        _,ext = os.path.splitext(out_path)
-        if os.path.isdir(out_path) or len(ext) < 2:
-            final_path = os.path.join(out_path, filename)
-            os.makedirs(out_path, exist_ok=True)
-        else:
-            # Assume out_path is the full desired path
-            final_path = out_path
-            filename = os.path.basename(final_path)
-            # Create parent directories if they don't exist
-            os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
-
-        if os.path.isfile(final_path):
-            print(f"File already exists: {final_path}")
-            return filename
         print(f"File: {filename}")
         print(f"Size: {file_size / (1024*1024):.2f} MB")
         print(f"Saving to: {final_path}")
