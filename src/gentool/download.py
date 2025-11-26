@@ -1,10 +1,9 @@
 import os
 import re
-import requests
-from urllib.parse import urlparse, unquote
+import requests, sys
+from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
-from functools import partial
 
 def get_valid_filename(response, url):
     """
@@ -80,7 +79,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
             return filename
         final_path, filename = get_full_path(out_path, filename)
         if os.path.isfile(final_path):
-            print(f"File already exists: {final_path}")
+#            print(f"File already exists: {final_path}")
             return filename
     else:
         filename = None
@@ -102,15 +101,15 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
                     return filename
                 final_path, filename = get_full_path(out_path, filename)
                 if os.path.isfile(final_path):
-                    print(f"File already exists: {final_path}")
+#                    print(f"File already exists: {final_path}")
                     return filename
                 
         if not filename:
             return filename
         
         print(f"File: {filename}")
-        print(f"Size: {file_size / (1024*1024):.2f} MB")
-        print(f"Saving to: {final_path}")
+#        print(f"Size: {file_size / (1024*1024):.2f} MB")
+#        print(f"Saving to: {final_path}")
 
         # 4. Check for Multi-part Support
         # If server doesn't support ranges or size is unknown, fallback to single stream
@@ -137,7 +136,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
 
         # 7. Start Download
         # unit_scale=True makes 1024 -> 1k, etc.
-        with tqdm(total=file_size, unit='B', unit_scale=True, desc="Downloading", ncols=80) as bar:
+        with tqdm(total=file_size, unit='B', unit_scale=True, ncols=80, file=sys.stdout) as bar:
             if max_concurrent_connections > 1:
                 with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
                     futures = []
