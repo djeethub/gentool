@@ -5,7 +5,7 @@ from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
 
-def get_valid_filename(response, url):
+def get_valid_filename(response):
     """
     Determines the correct filename from Content-Disposition header or URL.
     """
@@ -32,19 +32,27 @@ def download_chunk(url, start, end, file_path, bar, session):
     """
     Worker function to download a specific byte range.
     """
-    headers = {'Range': f'bytes={start}-{end}'}
-    try:
-        with session.get(url, headers=headers, stream=True, timeout=10) as r:
-            r.raise_for_status()
-            with open(file_path, 'r+b') as f:
-                f.seek(start)
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        bar.update(len(chunk))
-        return True
-    except Exception as e:
-        return False
+    retries = 3
+    while retries > 0:
+        retries -= 1
+        headers = {'Range': f'bytes={start}-{end}'}
+        try:
+            with session.get(url, headers=headers, stream=True, timeout=10) as r:
+                r.raise_for_status()
+                with open(file_path, 'r+b') as f:
+                    f.seek(start)
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            start += len(chunk)
+                            bar.update(len(chunk))
+            return True
+        except IOError as e:
+            raise e
+        except Exception as e:
+            if retries == 0:
+                raise e
+    return False
     
 def get_full_path(out_path, filename):
     _,ext = os.path.splitext(out_path)
@@ -59,7 +67,7 @@ def get_full_path(out_path, filename):
         os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
     return final_path, filename
 
-def download_file(url, out_path=None, max_concurrent_connections=4):
+def download_file(url, out_path=None, max_concurrent_connections=12):
     """
     Downloads a file from a URL with multi-connection support and visual progress.
 
@@ -96,7 +104,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
             
             # Determine filename
             if not filename:
-                filename = get_valid_filename(initial_response, final_url)
+                filename = get_valid_filename(initial_response)
                 if not filename or out_path is None:
                     return filename
                 final_path, filename = get_full_path(out_path, filename)
@@ -107,7 +115,7 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
         if not filename:
             return filename
         
-        print(f"File: {filename}")
+        print(f"Downloading: {filename}")
 #        print(f"Size: {file_size / (1024*1024):.2f} MB")
 #        print(f"Saving to: {final_path}")
 
@@ -116,6 +124,8 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
         if file_size == 0 or accept_ranges == 'none':
             print("Server does not support resume/ranges. Switching to single connection.")
             max_concurrent_connections = 1
+        else:
+            max_concurrent_connections = min(max_concurrent_connections, int(file_size / 5E+08) + 1)
 
         # 5. Prepare File on Disk
         # Create empty file of specific size to allow random access writes
@@ -169,6 +179,8 @@ def download_file(url, out_path=None, max_concurrent_connections=4):
         return None
     except Exception as e:
         print(f"\nDownload failed: {e}")
+        if out_path and os.path.exists(final_path):
+            os.remove(final_path) # Clean up partial file
         return None
     finally:
         session.close()
