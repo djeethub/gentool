@@ -5,6 +5,75 @@ from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
 
+class SpaceMap:
+    def __init__(self, total_space: int):
+        if total_space <= 0:
+            raise ValueError("Total space must be greater than 0.")
+        
+        self.total_space = total_space
+        self.occupied_intervals = []
+
+    def get_next_available(self, length: int):
+        if length <= 0:
+            raise ValueError("Length must be greater than 0.")
+
+        current_ptr = 0
+        for start, end in self.occupied_intervals:
+            gap_size = start - current_ptr
+            if gap_size > 0:
+                return (current_ptr, min(current_ptr + length - 1, start - 1))
+            current_ptr = max(current_ptr, end + 1)
+
+        if (self.total_space - current_ptr) > 0:
+            return (current_ptr, min(current_ptr + length - 1, self.total_space - 1))
+
+        return None
+
+    def fill(self, start: int, end: int):
+        if start > end:
+            raise ValueError("Start position cannot be greater than end position.")
+        if start < 0 or end >= self.total_space:
+            raise ValueError(f"Range {start}-{end} is out of bounds (0-{self.total_space-1}).")
+
+        self.occupied_intervals.append((start, end))
+        self.occupied_intervals.sort(key=lambda x: x[0])
+        merged = []
+        if not self.occupied_intervals:
+            return
+
+        current_start, current_end = self.occupied_intervals[0]
+        for i in range(1, len(self.occupied_intervals)):
+            next_start, next_end = self.occupied_intervals[i]
+
+            if next_start <= current_end + 1:
+                current_end = max(current_end, next_end)
+            else:
+                merged.append((current_start, current_end))
+                current_start, current_end = next_start, next_end
+
+        merged.append((current_start, current_end))
+        
+        self.occupied_intervals = merged
+
+    def vacant(self, start: int, end: int):
+        if start > end:
+            raise ValueError("Start position cannot be greater than end position.")
+        
+        new_intervals = []
+        for occ_start, occ_end in self.occupied_intervals:
+            if occ_end < start or occ_start > end:
+                new_intervals.append((occ_start, occ_end))
+            else:
+                if occ_start < start:
+                    new_intervals.append((occ_start, start - 1))
+                if occ_end > end:
+                    new_intervals.append((end + 1, occ_end))
+        
+        self.occupied_intervals = new_intervals
+
+    def reset(self):
+        self.occupied_intervals = []
+
 def get_valid_filename(response):
     """
     Determines the correct filename from Content-Disposition header or URL.
@@ -32,27 +101,20 @@ def download_chunk(url, start, end, file_path, bar, session):
     """
     Worker function to download a specific byte range.
     """
-    retries = 3
-    while retries > 0:
-        retries -= 1
-        headers = {'Range': f'bytes={start}-{end}'}
-        try:
-            with session.get(url, headers=headers, stream=True, timeout=10) as r:
-                r.raise_for_status()
-                with open(file_path, 'r+b') as f:
-                    f.seek(start)
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            start += len(chunk)
-                            bar.update(len(chunk))
-            return True
-        except IOError as e:
-            raise e
-        except Exception as e:
-            if retries == 0:
-                raise e
-    return False
+    headers = {'Range': f'bytes={start}-{end}'}
+    try:
+        with session.get(url, headers=headers, stream=True, timeout=10) as r:
+            r.raise_for_status()
+            with open(file_path, 'r+b') as f:
+                f.seek(start)
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        start += len(chunk)
+                        bar.update(len(chunk))
+        return True, start, end, None
+    except Exception as e:
+        return False, start, end, e
     
 def get_full_path(out_path, filename):
     _,ext = os.path.splitext(out_path)
@@ -67,7 +129,7 @@ def get_full_path(out_path, filename):
         os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
     return final_path, filename
 
-def download_file(url, out_path=None, max_concurrent_connections=12):
+def download_file(url, out_path=None, max_concurrent_connections=8):
     """
     Downloads a file from a URL with multi-connection support and visual progress.
 
@@ -115,7 +177,7 @@ def download_file(url, out_path=None, max_concurrent_connections=12):
         if not filename:
             return filename
         
-        print(f"Downloading: {filename}")
+        print(f"Downloading {filename}")
 #        print(f"Size: {file_size / (1024*1024):.2f} MB")
 #        print(f"Saving to: {final_path}")
 
@@ -134,41 +196,39 @@ def download_file(url, out_path=None, max_concurrent_connections=12):
                 f.truncate(file_size)
 
         # 6. Calculate Ranges
-        chunk_size = file_size // max_concurrent_connections
-        ranges = []
-        for i in range(max_concurrent_connections):
-            start = i * chunk_size
-            if i == max_concurrent_connections - 1:
-                end = file_size - 1  # Last chunk takes the remainder
-            else:
-                end = (i + 1) * chunk_size - 1
-            ranges.append((start, end))
+        chunk_size = -(-file_size // max_concurrent_connections)
+        map = SpaceMap(file_size)
 
         # 7. Start Download
         # unit_scale=True makes 1024 -> 1k, etc.
         with tqdm(total=file_size, unit='B', unit_scale=True, file=sys.stdout) as bar:
-            if max_concurrent_connections > 1:
-                with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
-                    futures = []
-                    for start, end in ranges:
+            with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
+                futures = []
+                retries = 3
+                while True:
+                    while len(futures) < max_concurrent_connections:
+                        next_range = map.get_next_available(chunk_size)
+                        if not next_range:
+                            break
+                        start, end = next_range
                         futures.append(
                             executor.submit(download_chunk, final_url, start, end, final_path, bar, session)
                         )
+                        map.fill(start, end)
+                    if not futures:
+                        break
                     
-                    # Wait for all chunks
                     for future in as_completed(futures):
-                        if not future.result():
-                            print("\nError occurred in one of the download threads.")
-                            return None
-            else:
-                # Single connection fallback
-                with session.get(final_url, stream=True) as r:
-                    r.raise_for_status()
-                    with open(final_path, 'wb') as f:
-                        for chunk in r.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                                bar.update(len(chunk))
+                        futures.remove(future)
+                        rlt, start, end, e = future.result()
+                        if not rlt:
+                            map.vacant(start, end)
+    #                        print("\nError occurred in one of the download threads.")
+                            if retries > 0:
+                                retries -= 1
+                                break
+                            else:
+                                raise e
 
         return filename
 
