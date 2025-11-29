@@ -103,7 +103,7 @@ def download_chunk(url, start, end, file_path, bar, session):
     """
     headers = {'Range': f'bytes={start}-{end}'}
     try:
-        with session.get(url, headers=headers, stream=True, timeout=10) as r:
+        with session.get(url, headers=headers, stream=True, timeout=15) as r:
             r.raise_for_status()
             with open(file_path, 'r+b') as f:
                 f.seek(start)
