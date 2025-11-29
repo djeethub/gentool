@@ -107,7 +107,7 @@ def download_chunk(url, start, end, file_path, bar, session):
             r.raise_for_status()
             with open(file_path, 'r+b') as f:
                 f.seek(start)
-                for chunk in r.iter_content(chunk_size=8192):
+                for chunk in r.iter_content(chunk_size=1024*1024):
                     if chunk:
                         f.write(chunk)
                         start += len(chunk)
