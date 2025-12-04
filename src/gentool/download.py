@@ -4,6 +4,8 @@ import requests, sys
 from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 class SpaceMap:
     def __init__(self, total_space: int):
@@ -107,7 +109,7 @@ def download_chunk(url, start, end, file_path, bar, session):
             r.raise_for_status()
             with open(file_path, 'r+b') as f:
                 f.seek(start)
-                for chunk in r.iter_content(chunk_size=1024*1024):
+                for chunk in r.iter_content(chunk_size=64*1024):
                     if chunk:
                         f.write(chunk)
                         start += len(chunk)
@@ -155,6 +157,17 @@ def download_file(url, out_path=None, max_concurrent_connections=8):
         filename = None
 
     session = requests.Session()
+
+    # Configure the HTTPAdapter
+    adapter = HTTPAdapter(
+        pool_connections=10, # Number of connection pools
+        pool_maxsize=20, # Max connections per pool
+        max_retries=Retry(total=5, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504]) # Retry settings
+    )
+
+    # Mount the adapter to the session
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
     
     try:
         # 1. Initial Head Request to get headers and resolve redirects
@@ -204,7 +217,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8):
         with tqdm(total=file_size, unit='B', unit_scale=True, file=sys.stdout) as bar:
             with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
                 futures = []
-                retries = 3
+                retries = 0
                 while True:
                     while len(futures) < max_concurrent_connections:
                         next_range = map.get_next_available(chunk_size)
