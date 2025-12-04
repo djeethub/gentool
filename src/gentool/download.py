@@ -109,7 +109,7 @@ def download_chunk(url, start, end, file_path, bar, session):
             r.raise_for_status()
             with open(file_path, 'r+b') as f:
                 f.seek(start)
-                for chunk in r.iter_content(chunk_size=64*1024):
+                for chunk in r.iter_content(chunk_size=128*1024):
                     if chunk:
                         f.write(chunk)
                         start += len(chunk)
@@ -217,7 +217,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8):
         with tqdm(total=file_size, unit='B', unit_scale=True, file=sys.stdout) as bar:
             with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
                 futures = []
-                retries = 0
+                retries = 3
                 while True:
                     while len(futures) < max_concurrent_connections:
                         next_range = map.get_next_available(chunk_size)
