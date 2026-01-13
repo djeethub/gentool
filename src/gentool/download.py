@@ -99,24 +99,29 @@ def get_valid_filename(response):
     # Sanitize filename (remove illegal chars for OS)
     return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
-def download_chunk(url, start, end, file_path, bar, session):
+def download_chunk(url, param, file_path, bar, session):
     """
     Worker function to download a specific byte range.
     """
-    headers = {'Range': f'bytes={start}-{end}'}
+    headers = {'Range': f'bytes={param[0]}-{param[1]}'}
     try:
         with session.get(url, headers=headers, stream=True, timeout=15) as r:
             r.raise_for_status()
             with open(file_path, 'r+b') as f:
-                f.seek(start)
+                f.seek(param[0])
                 for chunk in r.iter_content(chunk_size=128*1024):
                     if chunk:
                         f.write(chunk)
-                        start += len(chunk)
-                        bar.update(len(chunk))
-        return True, start, end, None
+                        l = len(chunk)
+                        if param[0] + l > param[1]:
+                            bar.update(param[1] - param[0] + 1)
+                            break
+                        else:
+                            param[0] += l
+                            bar.update(l)
+        return True, param[0], param[1], None
     except Exception as e:
-        return False, start, end, e
+        return False, param[0], param[1], e
     
 def get_full_path(out_path, filename):
     _,ext = os.path.splitext(out_path)
@@ -131,7 +136,7 @@ def get_full_path(out_path, filename):
         os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
     return final_path, filename
 
-def download_file(url, out_path=None, max_concurrent_connections=8):
+def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_size=1024*1024):
     """
     Downloads a file from a URL with multi-connection support and visual progress.
 
@@ -200,7 +205,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8):
             print("Server does not support resume/ranges. Switching to single connection.")
             max_concurrent_connections = 1
         else:
-            max_concurrent_connections = min(max_concurrent_connections, int(file_size / 5E+08) + 1)
+            max_concurrent_connections = min(max_concurrent_connections, int(file_size / min_chunk_size) + 1)
 
         # 5. Prepare File on Disk
         # Create empty file of specific size to allow random access writes
@@ -211,6 +216,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8):
         # 6. Calculate Ranges
         chunk_size = -(-file_size // max_concurrent_connections)
         map = SpaceMap(file_size)
+        param_dic = {}
 
         # 7. Start Download
         # unit_scale=True makes 1024 -> 1k, etc.
@@ -221,18 +227,30 @@ def download_file(url, out_path=None, max_concurrent_connections=8):
                 while True:
                     while len(futures) < max_concurrent_connections:
                         next_range = map.get_next_available(chunk_size)
-                        if not next_range:
-                            break
-                        start, end = next_range
-                        futures.append(
-                            executor.submit(download_chunk, final_url, start, end, final_path, bar, session)
-                        )
+                        if not next_range and param_dic:
+                            key = max(param_dic, key=lambda k: param_dic[k][1] - param_dic[k][0])
+                            param = param_dic[key]
+                            length = (param[1] - param[0] + 1) // 2
+                            if length > min_chunk_size:
+                                end = param[1]
+                                start = param[0] + length
+                                param[1] = start - 1
+                            else:
+                                break
+                        else:
+                            start, end = next_range
+                        param = [start, end]
+                        future = executor.submit(download_chunk, final_url, param, final_path, bar, session)
+                        param_dic[future] = param
+                        futures.append(future)
                         map.fill(start, end)
                     if not futures:
                         break
+                    bar.set_postfix(f"({len(futures)}c)")
                     
                     for future in as_completed(futures):
                         futures.remove(future)
+                        param_dic.pop(future)
                         rlt, start, end, e = future.result()
                         if not rlt:
                             map.vacant(start, end)
