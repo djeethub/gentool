@@ -231,7 +231,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                             key = max(param_dic, key=lambda k: param_dic[k][1] - param_dic[k][0])
                             param = param_dic[key]
                             length = (param[1] - param[0] + 1) // 2
-                            if length > min_chunk_size:
+                            if length >= min_chunk_size:
                                 end = param[1]
                                 start = param[0] + length
                                 param[1] = start - 1
@@ -246,7 +246,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                         map.fill(start, end)
                     if not futures:
                         break
-                    bar.set_postfix(f"({len(futures)}c)")
+                    bar.set_postfix_str(f"{len(futures)}c")
                     
                     for future in as_completed(futures):
                         futures.remove(future)
