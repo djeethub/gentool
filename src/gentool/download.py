@@ -216,27 +216,28 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
         # 6. Calculate Ranges
         chunk_size = -(-file_size // max_concurrent_connections)
         map = SpaceMap(file_size)
-        param_dic = {}
 
         # 7. Start Download
         # unit_scale=True makes 1024 -> 1k, etc.
         with tqdm(total=file_size, unit='B', unit_scale=True, file=sys.stdout) as bar:
             with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
                 futures = []
+                param_dic = {}
                 retries = 3
                 while True:
                     while len(futures) < max_concurrent_connections:
                         next_range = map.get_next_available(chunk_size)
-                        if not next_range and param_dic:
+                        if not next_range:
+                            if not param_dic:
+                                break
                             key = max(param_dic, key=lambda k: param_dic[k][1] - param_dic[k][0])
                             param = param_dic[key]
                             length = (param[1] - param[0] + 1) // 2
-                            if length >= min_chunk_size:
-                                end = param[1]
-                                start = param[0] + length
-                                param[1] = start - 1
-                            else:
+                            if length < min_chunk_size:
                                 break
+                            end = param[1]
+                            start = param[0] + length
+                            param[1] = start - 1
                         else:
                             start, end = next_range
                         param = [start, end]
@@ -246,7 +247,6 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                         map.fill(start, end)
                     if not futures:
                         break
-                    bar.set_postfix_str(f"{len(futures)}c")
                     
                     for future in as_completed(futures):
                         futures.remove(future)
@@ -255,12 +255,10 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                         if not rlt:
                             map.vacant(start, end)
     #                        print("\nError occurred in one of the download threads.")
-                            if retries > 0:
-                                retries -= 1
-                                break
-                            else:
+                            if retries <= 0:
                                 raise e
-
+                            retries -= 1
+                        break
         return filename
 
     except KeyboardInterrupt:
