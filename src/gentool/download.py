@@ -119,9 +119,9 @@ def download_chunk(url, param, file_path, bar, session):
                         else:
                             param[0] += l
                             bar.update(l)
-        return True, param[0], param[1], None
+        return True, None
     except Exception as e:
-        return False, param[0], param[1], e
+        return False, e
     
 def get_full_path(out_path, filename):
     _,ext = os.path.splitext(out_path)
@@ -204,8 +204,6 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
         if file_size == 0 or accept_ranges == 'none':
             print("Server does not support resume/ranges. Switching to single connection.")
             max_concurrent_connections = 1
-        else:
-            max_concurrent_connections = min(max_concurrent_connections, int(file_size / min_chunk_size) + 1)
 
         # 5. Prepare File on Disk
         # Create empty file of specific size to allow random access writes
@@ -214,7 +212,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                 f.truncate(file_size)
 
         # 6. Calculate Ranges
-        chunk_size = -(-file_size // max_concurrent_connections)
+        chunk_size = max(-(-file_size // max_concurrent_connections), min_chunk_size)
         map = SpaceMap(file_size)
 
         # 7. Start Download
@@ -222,16 +220,14 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
         with tqdm(total=file_size, unit='B', unit_scale=True, file=sys.stdout) as bar:
             with ThreadPoolExecutor(max_workers=max_concurrent_connections) as executor:
                 futures = []
-                param_dic = {}
                 retries = 3
                 while True:
                     while len(futures) < max_concurrent_connections:
                         next_range = map.get_next_available(chunk_size)
-                        if not next_range:
-                            if not param_dic:
-                                break
-                            key = max(param_dic, key=lambda k: param_dic[k][1] - param_dic[k][0])
-                            param = param_dic[key]
+                        if next_range:
+                            start, end = next_range
+                        elif futures:
+                            param = max(futures, key=lambda k: k.param[1] - k.param[0]).param
                             length = (param[1] - param[0] + 1) // 2
                             if length < min_chunk_size:
                                 break
@@ -239,10 +235,10 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                             start = param[0] + length
                             param[1] = start - 1
                         else:
-                            start, end = next_range
+                            break
                         param = [start, end]
                         future = executor.submit(download_chunk, final_url, param, final_path, bar, session)
-                        param_dic[future] = param
+                        future.param = param
                         futures.append(future)
                         map.fill(start, end)
                     if not futures:
@@ -250,10 +246,10 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                     
                     for future in as_completed(futures):
                         futures.remove(future)
-                        param_dic.pop(future)
-                        rlt, start, end, e = future.result()
+                        rlt, e = future.result()
                         if not rlt:
-                            map.vacant(start, end)
+                            param = future.param
+                            map.vacant(param[0], param[1])
     #                        print("\nError occurred in one of the download threads.")
                             if retries <= 0:
                                 raise e
