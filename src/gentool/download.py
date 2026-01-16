@@ -119,9 +119,9 @@ def download_chunk(url, param, file_path, bar, session):
                         else:
                             param[0] += l
                             bar.update(l)
-        return True, None
+        return None
     except Exception as e:
-        return False, e
+        return e
     
 def get_full_path(out_path, filename):
     _,ext = os.path.splitext(out_path)
@@ -166,7 +166,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
     # Configure the HTTPAdapter
     adapter = HTTPAdapter(
         pool_connections=10, # Number of connection pools
-        pool_maxsize=20, # Max connections per pool
+        pool_maxsize=max_concurrent_connections + 5, # Max connections per pool
         max_retries=Retry(total=5, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504]) # Retry settings
     )
 
@@ -246,26 +246,20 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                     
                     for future in as_completed(futures):
                         futures.remove(future)
-                        rlt, e = future.result()
-                        if not rlt:
-                            param = future.param
-                            map.vacant(param[0], param[1])
-    #                        print("\nError occurred in one of the download threads.")
+                        e = future.result()
+                        if e is not None:
                             if retries <= 0:
                                 raise e
                             retries -= 1
+                            param = future.param
+                            map.vacant(param[0], param[1])
+    #                        print("\nError occurred in one of the download threads.")
                         break
         return filename
 
-    except KeyboardInterrupt:
-        print("\nDownload cancelled.")
-        if out_path and os.path.exists(final_path):
-            os.remove(final_path) # Clean up partial file
-        return None
     except Exception as e:
-        print(f"\nDownload failed: {e}")
         if out_path and os.path.exists(final_path):
             os.remove(final_path) # Clean up partial file
-        return None
+        raise
     finally:
         session.close()
