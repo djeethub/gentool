@@ -99,6 +99,16 @@ def get_valid_filename(response):
     # Sanitize filename (remove illegal chars for OS)
     return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
+def safe_pwrite(fd, data, offset):
+    bytes_written = 0
+    total_to_write = len(data)
+    
+    while bytes_written < total_to_write:
+        n = os.pwrite(fd, data[bytes_written:], offset + bytes_written)
+        if n == 0:
+            raise OSError("Disk full or unexpected end of file during write")
+        bytes_written += n
+
 def download_chunk(url, param, file_path, bar, session):
     """
     Worker function to download a specific byte range.
@@ -114,11 +124,11 @@ def download_chunk(url, param, file_path, bar, session):
                         l = len(chunk)
                         if param[0] + l > param[1]:
                             l = param[1] - param[0] + 1
-                            os.pwrite(fd, chunk[:l], param[0])
+                            safe_pwrite(fd, chunk[:l], param[0])
                             bar.update(l)
                             break
                         else:
-                            os.pwrite(fd, chunk, param[0])
+                            safe_pwrite(fd, chunk, param[0])
                             param[0] += l
                             bar.update(l)
             finally:
