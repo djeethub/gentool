@@ -107,18 +107,22 @@ def download_chunk(url, param, file_path, bar, session):
     try:
         with session.get(url, headers=headers, stream=True, timeout=60) as r:
             r.raise_for_status()
-            with open(file_path, 'r+b') as f:
-                f.seek(param[0])
+            fd = os.open(file_path, os.O_RDWR)
+            try:
                 for chunk in r.iter_content(chunk_size=128*1024):
                     if chunk:
-                        f.write(chunk)
                         l = len(chunk)
                         if param[0] + l > param[1]:
-                            bar.update(param[1] - param[0] + 1)
+                            l = param[1] - param[0] + 1
+                            os.pwrite(fd, chunk[:l], param[0])
+                            bar.update(l)
                             break
                         else:
+                            os.pwrite(fd, chunk, param[0])
                             param[0] += l
                             bar.update(l)
+            finally:
+                os.close(fd)
         return None
     except Exception as e:
         return e
