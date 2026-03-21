@@ -100,10 +100,8 @@ def get_valid_filename(response):
     return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
 def safe_pwrite(fd, data, offset):
-    bytes_written = 0
-    total_to_write = len(data)
-    
-    while bytes_written < total_to_write:
+    bytes_written = os.pwrite(fd, data, offset)
+    while bytes_written < len(data):
         n = os.pwrite(fd, data[bytes_written:], offset + bytes_written)
         if n == 0:
             raise OSError("Disk full or unexpected end of file during write")
