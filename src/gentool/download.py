@@ -1,11 +1,15 @@
+import logging
 import os
 import re
+from tracemalloc import start
 import requests, sys
 from urllib.parse import unquote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
 
 class SpaceMap:
     def __init__(self, total_space: int):
@@ -111,6 +115,8 @@ def download_chunk(url, param, file_path, bar, session):
     """
     Worker function to download a specific byte range.
     """
+    start = param[0]
+    end = param[1]
     headers = {'Range': f'bytes={param[0]}-{param[1]}'}
     try:
         with session.get(url, headers=headers, stream=True, timeout=60) as r:
@@ -123,6 +129,7 @@ def download_chunk(url, param, file_path, bar, session):
                         if param[0] + l > param[1]:
                             l = param[1] - param[0] + 1
                             safe_pwrite(fd, chunk[:l], param[0])
+                            param[0] += l
                             bar.update(l)
                             break
                         else:
@@ -131,8 +138,10 @@ def download_chunk(url, param, file_path, bar, session):
                             bar.update(l)
             finally:
                 os.close(fd)
+            logger.debug(f"Finished downloading range {start}-{param[0]}, remainder {param[1]}-{end}")
         return None
     except Exception as e:
+        logger.debug(f"Error occurred while downloading range {start}-{param[0]}, remainder {param[1]}-{end}: {e}")
         return e
     
 def get_full_path(out_path, filename):
