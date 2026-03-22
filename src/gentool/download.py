@@ -129,6 +129,7 @@ def download_chunk(url, param, file_path, bar, session):
                         if param[0] + l > param[1]:
                             l = param[1] - param[0] + 1
                             safe_pwrite(fd, chunk[:l], param[0])
+                            param[0] += l
                             bar.update(l)
                             break
                         else:
@@ -268,12 +269,13 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                         futures.remove(future)
                         e = future.result()
                         if e is not None:
+    #                        print("\nError occurred in one of the download threads.")
                             if retries <= 0:
                                 raise e
                             retries -= 1
-                            param = future.param
+                        param = future.param
+                        if param[0] <= param[1]:
                             map.vacant(param[0], param[1])
-    #                        print("\nError occurred in one of the download threads.")
                         break
         return filename
 
