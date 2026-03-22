@@ -1,4 +1,3 @@
-import logging
 import os
 import re
 from tracemalloc import start
@@ -8,8 +7,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-logger = logging.getLogger(__name__)
 
 class SpaceMap:
     def __init__(self, total_space: int):
@@ -115,8 +112,6 @@ def download_chunk(url, param, file_path, bar, session):
     """
     Worker function to download a specific byte range.
     """
-    start = param[0]
-    end = param[1]
     headers = {'Range': f'bytes={param[0]}-{param[1]}'}
     try:
         with session.get(url, headers=headers, stream=True, timeout=60) as r:
@@ -138,10 +133,8 @@ def download_chunk(url, param, file_path, bar, session):
                             bar.update(l)
             finally:
                 os.close(fd)
-            logger.debug(f"Finished downloading range {start}-{param[1]} of {end}")
         return None
     except Exception as e:
-        logger.debug(f"Error occurred while downloading range {start}-{param[0]}-{param[1]} of {end}: {e}")
         return e
     
 def get_full_path(out_path, filename):
@@ -157,7 +150,7 @@ def get_full_path(out_path, filename):
         os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
     return final_path, filename
 
-def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_size=1024*1024):
+def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_mb=50):
     """
     Downloads a file from a URL with multi-connection support and visual progress.
 
@@ -166,6 +159,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
         out_path (str | None): Directory or full file path. 
                                If None, returns filename info without downloading.
         max_concurrent_connections (int): Number of threads for downloading.
+        min_chunk_mb (int): Minimum chunk size in MB for each download thread.
 
     Returns:
         str: The final output file path on success.
@@ -233,6 +227,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_si
                 f.truncate(file_size)
 
         # 6. Calculate Ranges
+        min_chunk_size = min_chunk_mb * 1024 * 1024
         chunk_size = max(-(-file_size // max_concurrent_connections), min_chunk_size)
         map = SpaceMap(file_size)
 
