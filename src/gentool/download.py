@@ -129,7 +129,6 @@ def download_chunk(url, param, file_path, bar, session):
                         if param[0] + l > param[1]:
                             l = param[1] - param[0] + 1
                             safe_pwrite(fd, chunk[:l], param[0])
-                            param[0] += l
                             bar.update(l)
                             break
                         else:
@@ -138,10 +137,10 @@ def download_chunk(url, param, file_path, bar, session):
                             bar.update(l)
             finally:
                 os.close(fd)
-            logger.debug(f"Finished downloading range {start}-{param[0]}, remainder {param[1]}-{end}")
+            logger.debug(f"Finished downloading range {start}-{param[1]} of {end}")
         return None
     except Exception as e:
-        logger.debug(f"Error occurred while downloading range {start}-{param[0]}, remainder {param[1]}-{end}: {e}")
+        logger.debug(f"Error occurred while downloading range {start}-{param[0]}-{param[1]} of {end}: {e}")
         return e
     
 def get_full_path(out_path, filename):
