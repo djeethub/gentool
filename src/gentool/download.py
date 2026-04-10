@@ -108,6 +108,25 @@ def safe_pwrite(fd, data, offset):
             raise OSError("Disk full or unexpected end of file during write")
         bytes_written += n
 
+def parse_content_range(range_str):
+    if not range_str:
+        return None
+
+    # Pattern matches: "bytes ", start, "-", end, "/", total
+    pattern = r"bytes\s+(\d+)-(\d+)/(\d+|\*)"
+    match = re.search(pattern, range_str)
+    
+    if match:
+        start = int(match.group(1))
+        end = int(match.group(2))
+        total = match.group(3)
+        
+        # Convert total to int if it's not '*'
+        total = int(total) if total != "*" else None
+        
+        return (start, end, total)
+    return None
+
 def download_chunk(url, param, file_path, bar, session):
     """
     Worker function to download a specific byte range.
@@ -116,6 +135,13 @@ def download_chunk(url, param, file_path, bar, session):
     try:
         with session.get(url, headers=headers, stream=True, timeout=60) as r:
             r.raise_for_status()
+            parsed_range = parse_content_range(r.headers.get('Content-Range'))
+            if parsed_range:
+                if parsed_range[0] != param[0]:
+                    raise ValueError(f"Server returned content range {parsed_range} does not match requested range {param[0]}-{param[1]}")
+            elif param[0] != 0:
+                raise ValueError(f"Server did not return a valid Content-Range header for range {param[0]}-{param[1]}")
+
             fd = os.open(file_path, os.O_RDWR)
             try:
                 for chunk in r.iter_content(chunk_size=128*1024):
