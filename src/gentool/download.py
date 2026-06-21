@@ -1,8 +1,7 @@
 import os
 import re
-from tracemalloc import start
 import requests, sys
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm.auto import tqdm
 from requests.adapters import HTTPAdapter
@@ -77,6 +76,32 @@ class SpaceMap:
     def reset(self):
         self.occupied_intervals = []
 
+def get_filename_from_http_cd(cd_header):
+    if not cd_header:
+        return None
+
+    # 1. Try matching filename* (RFC 5987) first - handles UTF-8 explicitly
+    # Matches: filename*=utf-8''%F0%9F%93%AC.txt or filename*=UTF-8'en'hello.txt
+    fn_star_match = re.search(r"filename\*=\s*([\w-]+)'[\w']*'([^;\n]*)", cd_header, flags=re.IGNORECASE)
+    if fn_star_match:
+        encoding, raw_name = fn_star_match.groups()
+        try:
+            return unquote(raw_name, encoding=encoding)
+        except LookupError:
+            return unquote(raw_name)  # Fallback if encoding is weird
+
+    # 2. Fallback to standard filename=
+    # Matches: filename="test.txt" or filename=test.txt
+    # This regex ensures we only grab what's inside the quotes if they exist,
+    # or stops at the semicolon if they don't.
+    fn_match = re.search(r'filename=\s*(?:"([^"\n]+)"|([^;\n]+))', cd_header, flags=re.IGNORECASE)
+    if fn_match:
+        # Use whichever group matched (quoted or unquoted)
+        raw_name = fn_match.group(1) or fn_match.group(2)
+        return raw_name.strip()
+
+    return None
+
 def get_valid_filename(response):
     """
     Determines the correct filename from Content-Disposition header or URL.
@@ -85,20 +110,20 @@ def get_valid_filename(response):
     # Try to get filename from Content-Disposition header
     cd = response.headers.get("content-disposition")
     if cd:
-        # Look for filename="name" or filename=name
-        fname_match = re.findall(r'filename\*?=([^;]+)', cd, flags=re.IGNORECASE)
-        if fname_match:
-            # Clean up the found name (remove " and ' and UTF-8 markers)
-            clean_name = fname_match[0].strip().strip('"').strip("'")
-            if "UTF-8''" in clean_name:
-                clean_name = clean_name.split("UTF-8''")[-1]
-            filename = unquote(clean_name)
+        filename = get_filename_from_http_cd(cd)
+    if not filename:
+        # Fallback to URL parsing
+        url = urlparse(response.url)
+        filename = unquote(os.path.basename(url.path))
 
-    if not filename or filename.strip() == "":
+    if not filename or not filename.strip():
         return None
 
     # Sanitize filename (remove illegal chars for OS)
-    return re.sub(r'[<>:"/\\|?*]', '_', filename)
+    filename = re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', filename)
+    # Strip leading/trailing dots and spaces which can trick OS file paths
+    filename = filename.strip('. ')
+    return filename
 
 def safe_pwrite(fd, data, offset):
     bytes_written = os.pwrite(fd, data, offset)
@@ -176,6 +201,16 @@ def get_full_path(out_path, filename):
         os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
     return final_path, filename
 
+def get_shortened_path(path: str) -> str:
+    parts = path.split(os.sep)
+
+    # If the path is just one component (like /file.ext), return it
+    if len(parts) <= 2:  # ['', 'file.ext']
+        return path
+
+    # Otherwise, return the last two components joined with a slash
+    return os.path.join(parts[-2], parts[-1])
+
 def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_mb=50):
     """
     Downloads a file from a URL with multi-connection support and visual progress.
@@ -191,7 +226,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_mb
         str: The final output file path on success.
         None: On failure.
     """
-    filename = os.path.basename(url)
+    filename = unquote(os.path.basename(url))
     if '.' in filename:
         if out_path is None:
             return filename
@@ -236,7 +271,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_mb
         if not filename:
             return filename
         
-        print(f"Downloading {filename}")
+        print(f"Downloading {get_shortened_path(final_path)}")
 #        print(f"Size: {file_size / (1024*1024):.2f} MB")
 #        print(f"Saving to: {final_path}")
 
