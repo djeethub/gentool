@@ -254,6 +254,7 @@ def download_file(url, out_path=None, max_concurrent_connections=8, min_chunk_mb
         # 1. Initial Head Request to get headers and resolve redirects
         # We use stream=True to avoid downloading body, but ensure we follow redirects
         with session.get(url, stream=True, allow_redirects=True) as initial_response:
+            initial_response.raise_for_status()
             final_url = initial_response.url
             file_size = int(initial_response.headers.get('content-length', 0))
             accept_ranges = initial_response.headers.get('accept-ranges', 'none')
