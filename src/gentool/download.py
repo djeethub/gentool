@@ -111,19 +111,20 @@ def get_valid_filename(response):
     cd = response.headers.get("content-disposition")
     if cd:
         filename = get_filename_from_http_cd(cd)
+        if filename:
+            filename = os.path.basename(filename)  # Sanitize to avoid directory traversal
     if not filename:
         # Fallback to URL parsing
         url = urlparse(response.url)
         filename = unquote(os.path.basename(url.path))
-
-    if not filename or not filename.strip():
+    if not filename:
         return None
-
-    # Sanitize filename (remove illegal chars for OS)
-    filename = re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', filename)
+    
+    filename = filename.strip()
     # Strip leading/trailing dots and spaces which can trick OS file paths
     filename = filename.strip('. ')
-    return filename
+    # Sanitize filename (remove illegal chars for OS)
+    return re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', filename)
 
 def safe_pwrite(fd, data, offset):
     bytes_written = os.pwrite(fd, data, offset)
